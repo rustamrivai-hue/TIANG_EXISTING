@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>TIANG EXISTING</title>
+<link rel="icon" type="image/png" href="logo.png" />
+<link rel="apple-touch-icon" href="logo.png" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+:root{--blue:#0d47a1;--blue-2:#1976d2;--bg:#f4f6fb;--card:#fff;--muted:#5b6b7a}
+*{box-sizing:border-box}
+body{font-family:Inter, system-ui, "Segoe UI", Roboto, Arial; margin:0; background:var(--bg); color:#0b1220}
+.header{background:linear-gradient(90deg,var(--blue),var(--blue-2));color:white;padding:16px 20px;display:flex;align-items:center;gap:12px;box-shadow:0 6px 18px rgba(13,71,161,0.12)}
+.logo{width:64px;height:64px;flex:0 0 64px;border-radius:14px;background:rgba(255,255,255,0.10);padding:8px;display:flex;align-items:center;justify-content:center}
+.logo img{width:100%;height:100%;object-fit:contain;display:block}
+.header .title{font-size:18px;font-weight:700;margin:0}
+.header .subtitle{font-size:12px;opacity:0.95;margin-top:4px}
+
+.container{max-width:1100px;margin:18px auto;padding:14px}
+.panel{background:var(--card);border-radius:10px;padding:14px;box-shadow:0 6px 18px rgba(13,71,161,0.04)}
+.form-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.form-row{display:flex;flex-direction:column}
+label{font-size:13px;color:#223}
+input[type="file"], input[type="number"], input[type="text"], select{margin-top:8px;padding:10px;border-radius:8px;border:1px solid #e6e9ef;background:white}
+.actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-start;margin-top:12px}
+.btn{padding:10px 16px;border-radius:10px;border:0;cursor:pointer;font-weight:600}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.primary{background:var(--blue);color:#fff;box-shadow:0 6px 18px rgba(13,71,161,0.12)}
+.btn.secondary{background:#fff;color:var(--blue);border:1px solid rgba(13,71,161,0.12)}
+.status{text-align:left;color:var(--muted);margin-top:12px}
+.count{text-align:left;color:var(--muted);margin-top:6px;font-weight:600}
+
+#map{height:560px;width:100%;border-radius:10px;margin-top:14px;border:1px solid rgba(13,71,161,0.06);background:#dfe6ee;z-index:0}
+.pole-label{background:rgba(13,71,161,.9);color:#fff;border:0;border-radius:4px;padding:1px 5px;font-size:11px;font-weight:600;box-shadow:none}
+.pole-label:before{display:none}
+
+footer{text-align:center;color:var(--muted);padding:12px;margin-top:12px;font-size:13px}
+@media(max-width:900px){.form-grid{grid-template-columns:1fr} #map{height:440px}}
+</style>
+</head>
+<body>
+  <header class="header">
+    <div class="logo"><img src="logo-putih.png" alt="Tarsius logo" onerror="this.style.display='none'" /></div>
+    <div>
+      <div class="title">TIANG EXISTING</div>
+      <div class="subtitle">Generator Titik Tiang Berdasarkan Titik Jalur<br/><small>By Rustam Rivai — versi online</small></div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="panel">
+      <div class="form-grid">
+        <div class="form-row" style="grid-column: span 2;">
+          <label>Pilih file KML (LineString)</label>
+          <input id="fileInput" type="file" accept=".kml" />
+        </div>
+        <div class="form-row">
+          <label>Prefix nama</label>
+          <input id="prefixInput" type="text" value="TE-" />
+        </div>
+        <div class="form-row">
+          <label>Mulai nomor</label>
+          <input id="startNum" type="number" value="1" min="1" />
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="processBtn" class="btn primary">Buat Placemark</button>
+        <button id="downloadBtn" class="btn secondary" disabled>Download KML</button>
+        <button id="clearBtn" class="btn secondary">Bersihkan</button>
+        <label style="display:flex;align-items:center;gap:6px;margin-left:8px">
+          <input id="labelToggle" type="checkbox" /> Tampilkan label nomor
+        </label>
+      </div>
+
+      <div class="status" id="status">Status: menunggu file...</div>
+      <div class="count" id="countInfo">Jumlah titik: 0</div>
+    </div>
+
+    <div id="map"></div>
+
+    <footer>By Rustam Rivai — versi online</footer>
+  </main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// Elements
+const fileInput = document.getElementById('fileInput');
+const processBtn = document.getElementById('processBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+const clearBtn = document.getElementById('clearBtn');
+const prefixInput = document.getElementById('prefixInput');
+const startNumInput = document.getElementById('startNum');
+const labelToggle = document.getElementById('labelToggle');
+const status = document.getElementById('status');
+const countInfo = document.getElementById('countInfo');
+
+// ---------- Map ----------
+const DEFAULT_VIEW = [-2.5, 118]; // Indonesia
+const DEFAULT_ZOOM = 5;
+
+const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap contributors'
+});
+const satelit = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 19,
+  attribution: 'Tiles &copy; Esri'
+});
+
+const map = L.map('map', {
+  center: DEFAULT_VIEW,
+  zoom: DEFAULT_ZOOM,
+  layers: [osm],
+  preferCanvas: true
+});
+L.control.layers({ 'Peta Jalan': osm, 'Satelit': satelit }, null, { position: 'topright' }).addTo(map);
+L.control.scale({ imperial: false }).addTo(map);
+
+// pastikan ukuran peta benar setelah halaman selesai dimuat / diubah ukurannya
+function fixSize(){ map.invalidateSize(); }
+window.addEventListener('load', () => setTimeout(fixSize, 100));
+window.addEventListener('resize', fixSize);
+
+let lineLayer = null;
+let pointsLayer = null;
+let lastKml = null;
+
+// ---------- KML parse ----------
+// Hanya ambil koordinat dari <LineString> supaya Point/Polygon tidak ikut terbaca sebagai jalur
+function parseKMLText(kmlText) {
+  const xml = new DOMParser().parseFromString(kmlText, 'application/xml');
+  if (xml.getElementsByTagName('parsererror').length) return null;
+
+  const lineNodes = xml.getElementsByTagName('LineString');
+  const allLines = [];
+  for (let i = 0; i < lineNodes.length; i++) {
+    const cNode = lineNodes[i].getElementsByTagName('coordinates')[0];
+    if (!cNode) continue;
+    const txt = cNode.textContent.trim();
+    if (!txt) continue;
+    const coords = txt.split(/\s+/).filter(Boolean).map(p => {
+      const a = p.split(',').map(Number);
+      return [a[0], a[1]]; // [lon, lat]
+    }).filter(c =>
+      Number.isFinite(c[0]) && Number.isFinite(c[1]) &&
+      c[0] >= -180 && c[0] <= 180 && c[1] >= -90 && c[1] <= 90
+    );
+    if (coords.length) allLines.push(coords);
+  }
+  return allLines;
+}
+
+function escXml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ---------- KML build ----------
+function buildKMLFromVertices(lines, prefix, startIndex) {
+  let header = '<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document>\n';
+  let body = '';
+  let idx = startIndex;
+  lines.forEach((coords, li) => {
+    const coordText = coords.map(c => c[0] + ',' + c[1] + ',0').join(' ');
+    body += `<Placemark><name>Jalur ${li+1}</name><LineString><coordinates>${coordText}</coordinates></LineString></Placemark>\n`;
+    coords.forEach(pt => {
+      body += `<Placemark><name>${escXml(prefix)}${idx}</name><Point><coordinates>${pt[0]},${pt[1]},0</coordinates></Point></Placemark>\n`;
+      idx++;
+    });
+  });
+  return header + body + '</Document></kml>';
+}
+
+// ---------- Render ----------
+function renderOnMap(lines, prefix, startIndex) {
+  clearLayers();
+  const lg = L.featureGroup();
+  const pg = L.featureGroup();
+  const showLabel = labelToggle.checked;
+  let idx = startIndex;
+
+  lines.forEach(coords => {
+    const latlngs = coords.map(c => [c[1], c[0]]);
+    L.polyline(latlngs, { color: '#ff9800', weight: 4, opacity: 0.9 }).addTo(lg);
+    coords.forEach(p => {
+      const name = `${prefix}${idx}`;
+      const m = L.circleMarker([p[1], p[0]], {
+        radius: 6, color: '#ffffff', weight: 2, fillColor: '#0d47a1', fillOpacity: 1
+      }).bindPopup(`<b>${name.replace(/</g,'&lt;')}</b><br>${p[1].toFixed(6)}, ${p[0].toFixed(6)}`);
+      m.bindTooltip(name, {
+        permanent: showLabel, direction: 'top', offset: [0, -6], className: 'pole-label'
+      });
+      m.addTo(pg);
+      idx++;
+    });
+  });
+
+  lineLayer = lg.addTo(map);
+  pointsLayer = pg.addTo(map);
+
+  map.invalidateSize();
+  const b = lg.getBounds();
+  if (b.isValid()) map.fitBounds(b, { padding: [30, 30], maxZoom: 19 });
+}
+
+function clearLayers() {
+  if (lineLayer) { map.removeLayer(lineLayer); lineLayer = null; }
+  if (pointsLayer) { map.removeLayer(pointsLayer); pointsLayer = null; }
+}
+
+// ---------- Events ----------
+let lastLines = null, lastPrefix = '', lastStart = 1;
+
+processBtn.addEventListener('click', async () => {
+  const file = fileInput.files[0];
+  if (!file) { alert('Pilih file KML terlebih dahulu.'); return; }
+  status.textContent = 'Membaca file...';
+  const text = await file.text();
+  const lines = parseKMLText(text);
+  if (lines === null) { status.textContent = 'File KML tidak valid.'; return; }
+  if (!lines.length) { status.textContent = 'Tidak ditemukan LineString di KML.'; return; }
+
+  lastPrefix = prefixInput.value || 'TE-';
+  lastStart = Math.max(1, Math.floor(Number(startNumInput.value)) || 1);
+  lastLines = lines;
+
+  lastKml = buildKMLFromVertices(lines, lastPrefix, lastStart);
+  renderOnMap(lines, lastPrefix, lastStart);
+
+  let count = 0; lines.forEach(l => count += l.length);
+  countInfo.textContent = 'Jumlah titik: ' + count;
+  status.textContent = 'Selesai: ' + count + ' titik dibuat dari ' + lines.length + ' jalur.';
+  downloadBtn.disabled = false;
+});
+
+labelToggle.addEventListener('change', () => {
+  if (lastLines) renderOnMap(lastLines, lastPrefix, lastStart);
+});
+
+downloadBtn.addEventListener('click', () => {
+  if (!lastKml) { alert('Belum ada KML untuk didownload.'); return; }
+  const blob = new Blob([lastKml], { type: 'application/vnd.google-earth.kml+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'tiang_existing.kml';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+});
+
+clearBtn.addEventListener('click', () => {
+  clearLayers();
+  lastKml = null; lastLines = null;
+  downloadBtn.disabled = true;
+  status.textContent = 'Status: dibersihkan.';
+  countInfo.textContent = 'Jumlah titik: 0';
+  fileInput.value = '';
+  map.setView(DEFAULT_VIEW, DEFAULT_ZOOM);
+});
+
+fileInput.addEventListener('change', () => { status.textContent = 'File dipilih. Klik "Buat Placemark".'; });
+</script>
+</body>
+</html>
